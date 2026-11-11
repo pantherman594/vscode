@@ -33,8 +33,8 @@ import { ScreenshotAnnotationEditor } from './screenshotAnnotation.js';
 import { getScreenshotSelectionHint, IScreenshotRect, ScreenshotSelection, ScreenshotSelectionOverlay } from './screenshotSelection.js';
 import { createScreenshotToolImage, getScreenshotToolImageData, IScreenshotToolCaptureEvent, IScreenshotToolCaptureOptions, IScreenshotToolEdit, IScreenshotToolEditable, IScreenshotToolImage, IScreenshotToolLayer, IScreenshotToolMarkUp, IScreenshotToolService, ScreenshotToolActiveContext, ScreenshotToolMode, ScreenshotToolResult, ScreenshotToolSurface, toImageCarouselMarkUp } from './screenshotTool.js';
 
-/** How long the window gets to repaint without the overlay before it is captured. */
-const OVERLAY_REMOVAL_DELAY = 100;
+/** How long the window gets to repaint, without the overlay or UI that just closed, before it is captured. */
+const REPAINT_DELAY = 100;
 
 /** How many screenshots attached to chat stay editable, which bounds the memory their originals take. */
 const MAX_EDITABLE_ATTACHMENTS = 10;
@@ -194,16 +194,16 @@ export class ScreenshotToolService extends Disposable implements IScreenshotTool
 		}
 	}
 
-	async captureWindow(targetWindow: CodeWindow): Promise<IScreenshotToolImage | undefined> {
+	async captureWindow(targetWindow: CodeWindow, options?: { readonly afterRepaint?: boolean }): Promise<IScreenshotToolImage | undefined> {
 		try {
-			return (await this.captureWindowArea(targetWindow, undefined, false))?.image;
+			return (await this.captureWindowArea(targetWindow, undefined, !!options?.afterRepaint))?.image;
 		} catch (error) {
 			this.logService.error('[ScreenshotTool] Capturing the window failed:', error);
 			return undefined;
 		}
 	}
 
-	async edit(screenshot: IScreenshotToolEditable, surface: ScreenshotToolSurface): Promise<IScreenshotToolEdit | undefined> {
+	async edit(screenshot: IScreenshotToolEditable, surface: ScreenshotToolSurface, name?: string): Promise<IScreenshotToolEdit | undefined> {
 		// The Images Preview opens as a modal editor in the main window, which comes to the front, and focus goes back to a reporter in its own window afterwards.
 		const previousWindow = getActiveWindow();
 		const previousFocus = previousWindow.document.activeElement;
@@ -211,12 +211,12 @@ export class ScreenshotToolService extends Disposable implements IScreenshotTool
 		const { data, mimeType } = getScreenshotToolImageData(screenshot.original);
 		const input = new ImageCarouselEditorInput({
 			id: generateUuid(),
-			title: localize('editScreenshot', "Edit Screenshot"),
+			title: name ? localize('editImage', "Edit Image") : localize('editScreenshot', "Edit Screenshot"),
 			sections: [{
 				title: '',
 				images: [{
 					id: generateUuid(),
-					name: localize('screenshot', "Screenshot"),
+					name: name ?? localize('screenshot', "Screenshot"),
 					mimeType,
 					data,
 					markUp: container => {
@@ -434,9 +434,9 @@ export class ScreenshotToolService extends Disposable implements IScreenshotTool
 	 * Captures the window or an area of it, painting layers that the window capture misses over it. Layers that other UI
 	 * covers keep the placeholder under that UI, as the user sees them.
 	 */
-	private async captureWindowArea(targetWindow: CodeWindow, area: IScreenshotRect | undefined, afterOverlay: boolean): Promise<Omit<ICapture, 'mode'> | undefined> {
-		if (afterOverlay) {
-			await timeout(OVERLAY_REMOVAL_DELAY);
+	private async captureWindowArea(targetWindow: CodeWindow, area: IScreenshotRect | undefined, afterRepaint: boolean): Promise<Omit<ICapture, 'mode'> | undefined> {
+		if (afterRepaint) {
+			await timeout(REPAINT_DELAY);
 		}
 		const bounds: IScreenshotRect = { x: 0, y: 0, width: targetWindow.innerWidth, height: targetWindow.innerHeight };
 		const target = area ?? bounds;
